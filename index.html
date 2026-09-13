@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Run Gear Forecaster</title>
+    
+    <!-- Load the PyScript framework -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    
+    <!-- Basic styling to make it look like a clean mobile app -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            font-size: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-top: 15px;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 25px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #result_text {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #eef2f5;
+            border-radius: 6px;
+            white-space: pre-wrap; 
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>When Are You Running?</h1>
+        
+        <label for="city_input">City:</label>
+        <input type="text" id="city_input" value="Prague">
+        
+        <label for="time_input">Time:</label>
+        <input type="text" id="time_input" value="now">
+        
+        <!-- PyScript binds the Python function to this click event -->
+        <button id="fetch_btn" py-click="fetch_weather">Get Run Gear</button>
+        
+        <div id="result_text">Enter a location and time to gear up.</div>
+    </div>
+
+    <!-- Configure the environment to install our date parser library -->
+    <py-config>
+        packages = ["dateparser"]
+    </py-config>
+
+    <!-- The Python Logic -->
+    <script type="py">
+        import dateparser
+        from datetime import datetime
+        from pyodide.http import pyfetch
+        from pyscript import document
+
+        async def fetch_weather(event):
+            # Read inputs from the HTML fields
+            city = document.getElementById("city_input").value.strip()
+            time_input = document.getElementById("time_input").value.strip().lower()
+            result_element = document.getElementById("result_text")
+
+            if not city:
+                result_element.innerText = "Please enter a city name."
+                return
+                
+            result_element.innerText = "Fetching forecast... (This might take a few seconds on first load)"
+
+            try:
+                # 1. Figure out target time
+                if time_input == "" or time_input == "now":
+                    target_time = "now"
+                else:
+                    parsed_time = dateparser.parse(time_input, settings={'PREFER_DATES_FROM': 'future'})
+                    if not parsed_time:
+                        result_element.innerText = f"Could not understand the time: '{time_input}'."
+                        return
+                    target_time = parsed_time.replace(tzinfo=None)
+
+                # 2. Get Coordinates using pyfetch instead of requests
+                geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=en&format=json"
+                geo_resp = await pyfetch(geo_url)
+                geo_data = await geo_resp.json()
+
+                if "results" not in geo_data:
+                    result_element.innerText = f"Could not find city: {city}"
+                    return
+
+                lat = geo_data["results"][0]["latitude"]
+                lon = geo_data["results"][0]["longitude"]
+
+                # 3. Fetch Forecast Weather
+                weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,precipitation,is_day&hourly=temperature_2m,wind_speed_10m,precipitation,is_day&timezone=auto"
+                weather_resp = await pyfetch(weather_url)
+                weather_data = await weather_resp.json()
+
+                # 4. Match Time to Data
+                if target_time == "now":
+                    current = weather_data["current"]
+                    temp = current["temperature_2m"]
+                    wind_speed = current["wind_speed_10m"]
+                    precipitation = current["precipitation"]
+                    is_day = bool(current["is_day"])
+                    display_time = "Right Now"
+                else:
+                    times = weather_data["hourly"]["time"]
+                    api_times = [datetime.fromisoformat(t) for t in times]
+                    closest_idx = min(range(len(api_times)), key=lambda i: abs(api_times[i] - target_time))
+
+                    temp = weather_data["hourly"]["temperature_2m"][closest_idx]
+                    wind_speed = weather_data["hourly"]["wind_speed_10m"][closest_idx]
+                    precipitation = weather_data["hourly"]["precipitation"][closest_idx]
+                    is_day = bool(weather_data["hourly"]["is_day"][closest_idx])
+                    
+                    display_time = api_times[closest_idx].strftime("%A, %b %d at %H:%M")
+
+                windy = wind_speed > 20.0
+                rainy = precipitation > 0.5
+
+                recommendation = get_clothing_recommendation(temp, windy, rainy, is_day)
+                time_icon = "☀️" if is_day else "🌙"
+
+                # 5. Push the results to the HTML screen
+                result_element.innerText = (
+                    f"⏱️ Forecast for: {display_time} {time_icon}\n"
+                    f"🌡️ Temp: {temp}°C | 💨 Wind: {wind_speed} km/h | 🌧️ Rain: {precipitation} mm\n\n"
+                    f"--- Running Gear Recommendation ---\n"
+                    f"{recommendation}"
+                )
+
+            except Exception as e:
+                result_element.innerText = f"Network Error: {str(e)}"
+
+        def get_clothing_recommendation(temp, windy, rainy, is_day):
+            if temp >= 10:
+                bottoms = "running shorts"
+            elif temp >= 0:
+                bottoms = "light running tights"
+            else:
+                bottoms = "thermal winter running tights"
+
+            if temp >= 20:
+                tops = "a moisture-wicking singlet or tank top"
+            elif temp >= 12:
+                tops = "a short-sleeve tech shirt"
+            elif temp >= 5:
+                tops = "a long-sleeve moisture-wicking shirt"
+            elif temp >= -5:
+                tops = "a long-sleeve base layer and a light running jacket"
+            else:
+                tops = "a thermal base layer, mid-layer, and a windproof running jacket"
+
+            accessories = []
+            
+            if windy and temp >= 5:
+                accessories.append("a light running windbreaker")
+            if rainy:
+                accessories.append("a running cap with a brim (keeps rain out of your eyes)")
+                if temp < 15:
+                    accessories.append("a water-resistant running jacket")
+            if temp < 5 and temp >= -5:
+                accessories.append("light running gloves and a thin headband or beanie")
+            elif temp < -5:
+                accessories.append("warm running gloves, a thermal beanie, and a neck gaiter (buff)")
+                
+            if temp >= 10 and not rainy and is_day:
+                accessories.append("running sunglasses")
+                
+            if not is_day:
+                accessories.append("reflective gear or a running light (stay visible!)")
+
+            if accessories:
+                acc_text = "\n   - ".join(accessories)
+                extras_display = f"\n   - {acc_text.capitalize()}"
+            else:
+                extras_display = " Nothing special"
+
+            return f"👖 Bottoms: {bottoms.capitalize()}\n👕 Tops: {tops.capitalize()}\n👟 Extras:{extras_display}"
+    </script>
+</body>
+</html>
