@@ -83,7 +83,6 @@
     <script>
         const timeInput = document.getElementById('time_input');
 
-        // Set the default datetime input to your current local time
         const now = new Date();
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         timeInput.value = now.toISOString().slice(0, 16);
@@ -103,7 +102,6 @@
             try {
                 const targetTime = new Date(timeStr);
 
-                // 1. Get Coordinates
                 const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
                 const geoResp = await fetch(geoUrl);
                 const geoData = await geoResp.json();
@@ -116,7 +114,6 @@
                 const lat = geoData.results[0].latitude;
                 const lon = geoData.results[0].longitude;
 
-                // 2. Fetch Weather Forecast
                 const fields = "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,uv_index,is_day";
                 const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${fields}&hourly=${fields}&timezone=auto`;
                 const weatherResp = await fetch(weatherUrl);
@@ -184,7 +181,7 @@
         function getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay) {
             const t = feelsLike;
 
-            // --- Bottoms (Personalized) ---
+            // --- Bottoms ---
             let bottoms;
             if (t >= 10) {
                 bottoms = "Running elastic shorts";
@@ -196,7 +193,7 @@
                 bottoms = "Warm long tights with your BJJ shorts layered on top";
             }
 
-            // --- Tops (Personalized) ---
+            // --- Tops ---
             let tops;
             if (t >= 18) {
                 tops = "Short sleeve technical shirt";
@@ -212,7 +209,7 @@
 
             let accessories = [];
             
-            // --- Wind / Rain Adjustments ---
+            // --- Wind / Rain ---
             if (windy && t < 15) {
                 accessories.push("Light vest (to block the wind on your core)");
             }
@@ -220,12 +217,14 @@
                 accessories.push("Note: You don't have a rain shell in your wardrobe, so prepare to get wet!");
             }
 
-            // --- Head & Neck ---
+            // --- Head & Hands ---
             if (t < -5) {
                 accessories.push("Warm cap");
                 accessories.push("Neck gaiter");
+                accessories.push("Tight Decathlon running gloves (Note: these might be a bit too cold for sub -5°C!)");
             } else if (t < 5) {
                 accessories.push("Light cap");
+                accessories.push("Tight Decathlon running gloves");
             }
 
             // --- Sun Protection ---
@@ -237,7 +236,7 @@
             }
             
             // --- Standard Loadout ---
-            accessories.push("Kiprun adjustable belt (for keys/phone)");
+            accessories.push("Kiprun adjustable belt");
 
             let extrasDisplay;
             if (accessories.length > 0) {
