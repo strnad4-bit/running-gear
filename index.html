@@ -73,8 +73,8 @@
         <input type="text" id="city_input" value="Prague">
 
         <label for="time_input">Time:</label>
-        <!-- Added step="1800" to restrict input to 30-minute (1800 second) increments -->
-        <input type="datetime-local" id="time_input" step="1800">
+        <!-- step="900" is 900 seconds (15 minutes) -->
+        <input type="datetime-local" id="time_input" step="900">
 
         <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
 
@@ -82,17 +82,32 @@
     </div>
 
     <script>
-        // Set the default datetime input to the nearest 30-minute mark of your current local time
+        const timeInput = document.getElementById('time_input');
+
+        // Set the default datetime input to the nearest 15-minute mark
         const now = new Date();
         const currentMinutes = now.getMinutes();
-        // Snap to 00 or 30
-        now.setMinutes(currentMinutes >= 30 ? 30 : 0, 0, 0); 
+        now.setMinutes(Math.round(currentMinutes / 15) * 15, 0, 0); 
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-        document.getElementById('time_input').value = now.toISOString().slice(0, 16);
+        timeInput.value = now.toISOString().slice(0, 16);
+
+        // Force the input to snap to 15-minute intervals if the user clicks a wrong minute
+        timeInput.addEventListener('change', function(e) {
+            if (!e.target.value) return;
+            const d = new Date(e.target.value);
+            const m = d.getMinutes();
+            if (m % 15 !== 0) {
+                // Round to the nearest 15 minutes
+                d.setMinutes(Math.round(m / 15) * 15);
+                // Reformat to local time string
+                d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+                e.target.value = d.toISOString().slice(0, 16);
+            }
+        });
 
         async function fetchWeather() {
             const city = document.getElementById("city_input").value.trim();
-            const timeStr = document.getElementById("time_input").value;
+            const timeStr = timeInput.value;
             const resultElement = document.getElementById("result_text");
 
             if (!city) {
@@ -188,7 +203,6 @@
         function getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay) {
             const t = feelsLike;
 
-            // --- Bottoms ---
             let bottoms;
             if (t >= 10) {
                 bottoms = "running shorts";
@@ -198,7 +212,6 @@
                 bottoms = "thermal winter running tights";
             }
 
-            // --- Tops ---
             let tops;
             if (t >= 20) {
                 tops = "a moisture-wicking singlet or tank top";
@@ -212,7 +225,6 @@
                 tops = "a thermal base layer and an insulating mid-layer";
             }
 
-            // --- Outer shell ---
             let shell = null;
             if (rainy) {
                 shell = (t < 15)
@@ -224,7 +236,6 @@
                 shell = "a light running windbreaker";
             }
 
-            // --- Accessories ---
             let accessories = [];
             if (shell) accessories.push(shell);
 
