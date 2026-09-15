@@ -202,13 +202,21 @@
             } else if (t >= 5) {
                 tops = "Warm long sleeve technical shirt";
             } else if (t >= 0) {
-                tops = "Long sleeve technical shirt with your BJJ short sleeve rashguard layered on top";
+                tops = "Warm long sleeve technical shirt with your BJJ short sleeve rashguard layered on top";
             } else {
                 tops = "Warm long sleeve technical shirt and your Fleece";
             }
 
+            // --- Socks ---
+            let socks;
+            if (t < 5) {
+                socks = "Warm running socks";
+            } else {
+                socks = "Normal running socks";
+            }
+
             let accessories = [];
-            
+
             // --- Wind / Rain ---
             if (windy && t < 15) {
                 accessories.push("Light vest (to block the wind on your core)");
@@ -217,14 +225,23 @@
                 accessories.push("Note: You don't have a rain shell in your wardrobe, so prepare to get wet!");
             }
 
-            // --- Head & Hands ---
-            if (t < -5) {
+            // --- Head ---
+            if (t < 2) {
                 accessories.push("Warm cap");
-                accessories.push("Neck gaiter");
-                accessories.push("Tight Decathlon running gloves (Note: these might be a bit too cold for sub -5°C!)");
-            } else if (t < 5) {
-                accessories.push("Light cap");
+            } else if (t < 8) {
+                accessories.push(rainy ? "Light cap (keeps rain out of your eyes)" : "Light cap");
+            } else if (rainy) {
+                accessories.push("Light cap (keeps rain out of your eyes)");
+            }
+
+            // --- Hands ---
+            if (t < 8) {
                 accessories.push("Tight Decathlon running gloves");
+            }
+
+            // --- Neck ---
+            if (t < -5 || (windy && t < 2)) {
+                accessories.push("Neck gaiter");
             }
 
             // --- Sun Protection ---
@@ -232,11 +249,8 @@
                 accessories.push("Running sunglasses");
             }
             if (isDay && uvIndex >= 6) {
-                accessories.push("Sweat-resistant sunscreen (UV is high)");
+                accessories.push("Sunscreen (UV is high)");
             }
-            
-            // --- Standard Loadout ---
-            accessories.push("Kiprun adjustable belt");
 
             let extrasDisplay;
             if (accessories.length > 0) {
@@ -246,7 +260,7 @@
                 extrasDisplay = " Nothing special";
             }
 
-            return `👖 Bottoms: ${bottoms}\n👕 Tops: ${tops}\n👟 Extras:${extrasDisplay}`;
+            return `👖 Bottoms: ${bottoms}\n👕 Tops: ${tops}\n🧦 Socks: ${socks}\n👟 Extras:${extrasDisplay}`;
         }
     </script>
 </body>
