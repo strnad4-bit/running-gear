@@ -126,7 +126,6 @@
                 const nowMs = new Date().getTime();
                 const targetMs = targetTime.getTime();
 
-                // If target time is within 1 hour of right now, use real-time current values
                 if (Math.abs(nowMs - targetMs) < 3600000) {
                     const current = weatherData.current;
                     temp = current.temperature_2m;
@@ -162,7 +161,6 @@
                     displayTime = closestDate.toLocaleDateString('en-US', options);
                 }
 
-                // Guard against missing/null values from the API
                 if (feelsLike === null || feelsLike === undefined) feelsLike = temp;
                 if (uvIndex === null || uvIndex === undefined) uvIndex = 0;
 
@@ -175,7 +173,7 @@
                 resultElement.innerText =
                     `⏱️ Forecast for: ${displayTime} ${timeIcon}\n` +
                     `🌡️ Temp: ${temp}°C (feels ${feelsLike}°C) | 💨 Wind: ${windSpeed} km/h | 🌧️ Rain: ${precipitation} mm | ☀️ UV: ${uvIndex}\n\n` +
-                    `--- Running Gear Recommendation ---\n` +
+                    `--- Your Running Gear ---\n` +
                     `${recommendation}`;
 
             } catch (e) {
@@ -186,58 +184,60 @@
         function getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay) {
             const t = feelsLike;
 
+            // --- Bottoms (Personalized) ---
             let bottoms;
             if (t >= 10) {
-                bottoms = "running shorts";
+                bottoms = "Running elastic shorts";
             } else if (t >= 0) {
-                bottoms = "light running tights";
-            } else {
-                bottoms = "thermal winter running tights";
-            }
-
-            let tops;
-            if (t >= 20) {
-                tops = "a moisture-wicking singlet or tank top";
-            } else if (t >= 12) {
-                tops = "a short-sleeve tech shirt";
-            } else if (t >= 5) {
-                tops = "a long-sleeve moisture-wicking shirt";
+                bottoms = "Light long tights";
             } else if (t >= -5) {
-                tops = "a long-sleeve base layer";
+                bottoms = "Warm long tights";
             } else {
-                tops = "a thermal base layer and an insulating mid-layer";
+                bottoms = "Warm long tights with your BJJ shorts layered on top";
             }
 
-            let shell = null;
-            if (rainy) {
-                shell = (t < 15)
-                    ? "a water-resistant running jacket"
-                    : "a light water-resistant shell (or just a cap if you don't mind getting wet)";
-            } else if (t < -5) {
-                shell = "a windproof running jacket";
-            } else if (windy && t < 12) {
-                shell = "a light running windbreaker";
+            // --- Tops (Personalized) ---
+            let tops;
+            if (t >= 18) {
+                tops = "Short sleeve technical shirt";
+            } else if (t >= 10) {
+                tops = "Long sleeve technical shirt (or BJJ long sleeve rashguard)";
+            } else if (t >= 5) {
+                tops = "Warm long sleeve technical shirt";
+            } else if (t >= 0) {
+                tops = "Long sleeve technical shirt with your BJJ short sleeve rashguard layered on top";
+            } else {
+                tops = "Warm long sleeve technical shirt and your Fleece";
             }
 
             let accessories = [];
-            if (shell) accessories.push(shell);
-
+            
+            // --- Wind / Rain Adjustments ---
+            if (windy && t < 15) {
+                accessories.push("Light vest (to block the wind on your core)");
+            }
             if (rainy) {
-                accessories.push("a running cap with a brim (keeps rain out of your eyes)");
+                accessories.push("Note: You don't have a rain shell in your wardrobe, so prepare to get wet!");
             }
 
-            if (t < 5 && t >= -5) {
-                accessories.push("light running gloves and a thin headband or beanie");
-            } else if (t < -5) {
-                accessories.push("warm running gloves, a thermal beanie, and a neck gaiter (buff)");
+            // --- Head & Neck ---
+            if (t < -5) {
+                accessories.push("Warm cap");
+                accessories.push("Neck gaiter");
+            } else if (t < 5) {
+                accessories.push("Light cap");
             }
 
+            // --- Sun Protection ---
             if (isDay && !rainy && uvIndex >= 3) {
-                accessories.push("running sunglasses");
+                accessories.push("Running sunglasses");
             }
             if (isDay && uvIndex >= 6) {
-                accessories.push("sweat-resistant sunscreen (UV is high)");
+                accessories.push("Sweat-resistant sunscreen (UV is high)");
             }
+            
+            // --- Standard Loadout ---
+            accessories.push("Kiprun adjustable belt (for keys/phone)");
 
             let extrasDisplay;
             if (accessories.length > 0) {
@@ -247,10 +247,7 @@
                 extrasDisplay = " Nothing special";
             }
 
-            const capBottoms = bottoms.charAt(0).toUpperCase() + bottoms.slice(1);
-            const capTops = tops.charAt(0).toUpperCase() + tops.slice(1);
-
-            return `👖 Bottoms: ${capBottoms}\n👕 Tops: ${capTops}\n👟 Extras:${extrasDisplay}`;
+            return `👖 Bottoms: ${bottoms}\n👕 Tops: ${tops}\n👟 Extras:${extrasDisplay}`;
         }
     </script>
 </body>
