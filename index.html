@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Run Gear Forecaster</title>
+    <title>Run Gear Forecaster — v6</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -31,7 +31,7 @@
             display: block;
             margin-top: 15px;
         }
-        input[type="text"], input[type="datetime-local"] {
+        input[type="text"], input[type="datetime-local"], select {
             width: 100%;
             padding: 10px;
             margin-top: 5px;
@@ -84,12 +84,18 @@
 <body>
     <div class="container">
         <h1>When Are You Running?</h1>
+        <p style="text-align:center; font-size:12px; color:#0077b6; font-weight:bold; margin:-10px 0 16px;">v6 · 15 Sep 2026</p>
 
-        <label for="city_input">City:</label>
-        <input type="text" id="city_input" placeholder="Detecting your location…">
+        <label for="city_select">City:</label>
+        <select id="city_select">
+            <option value="Prague">Praha / Prague</option>
+            <option value="Koblasko">Koblasko</option>
+            <option value="__other__">Other (type below)…</option>
+        </select>
+        <input type="text" id="city_input" placeholder="Type a city name" style="display:none; margin-top:8px;">
 
         <label for="time_input">Time:</label>
-        <input type="datetime-local" id="time_input" step="900">
+        <input type="datetime-local" id="time_input">
 
         <label for="offset_input">Body thermostat: <span id="offset_label">Neutral</span></label>
         <input type="range" id="offset_input" min="-4" max="4" step="1" value="0">
@@ -102,7 +108,7 @@
 
         <div id="result_text">Enter a location and time to gear up.</div>
 
-        <p class="version">v4 · updated 15 Sep 2026</p>
+        <p class="version">v6 · updated 15 Sep 2026</p>
     </div>
 
     <script>
@@ -111,8 +117,7 @@
         const offsetLabel = document.getElementById('offset_label');
         const fetchBtn = document.getElementById('fetch_btn');
         const cityInput = document.getElementById('city_input');
-
-        const FALLBACK_CITY = "Prague";
+        const citySelect = document.getElementById('city_select');
 
         function updateOffsetLabel() {
             const v = parseInt(offsetInput.value, 10);
@@ -123,10 +128,22 @@
         offsetInput.addEventListener('input', updateOffsetLabel);
         updateOffsetLabel();
 
-        // --- City default: current location, with a fallback you can overwrite ---
-        cityInput.value = FALLBACK_CITY;
+        // Show the free-text box only when "Other" is selected.
+        citySelect.addEventListener('change', () => {
+            const other = citySelect.value === '__other__';
+            cityInput.style.display = other ? 'block' : 'none';
+            if (other) cityInput.focus();
+        });
+
+        function getCity() {
+            return citySelect.value === '__other__'
+                ? cityInput.value.trim()
+                : citySelect.value;
+        }
+
+        // --- Default the dropdown to your current location when we can detect it ---
         (function detectLocation() {
-            if (!navigator.geolocation) return; // keep fallback
+            if (!navigator.geolocation) return; // leave Prague selected
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 try {
                     const { latitude, longitude } = pos.coords;
@@ -135,21 +152,28 @@
                     const resp = await fetch(url);
                     const data = await resp.json();
                     const detected = data.city || data.locality || data.principalSubdivision;
-                    // Only overwrite if the user hasn't already typed something else.
-                    if (detected && cityInput.value === FALLBACK_CITY) cityInput.value = detected;
-                } catch (e) { /* keep fallback */ }
-            }, () => { /* denied or unavailable: keep fallback */ },
+                    if (!detected) return;
+                    const low = detected.toLowerCase();
+                    // Matches a preset? select it. Otherwise add it on top and select it.
+                    if (low.includes('prague') || low.includes('praha')) {
+                        citySelect.value = 'Prague';
+                    } else if (low.includes('koblasko')) {
+                        citySelect.value = 'Koblasko';
+                    } else {
+                        const opt = document.createElement('option');
+                        opt.value = detected;
+                        opt.textContent = '📍 ' + detected;
+                        citySelect.insertBefore(opt, citySelect.firstChild);
+                        citySelect.value = detected;
+                    }
+                } catch (e) { /* leave Prague selected */ }
+            }, () => { /* denied or unavailable: leave Prague selected */ },
                { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 });
         })();
 
-        function getCity() {
-            return cityInput.value.trim();
-        }
-
-        // Default the time to now, rounded to the nearest 15 min (matches the picker step).
+        // Default the time to now.
         const pad = n => String(n).padStart(2, '0');
         const startNow = new Date();
-        startNow.setMinutes(Math.round(startNow.getMinutes() / 15) * 15, 0, 0);
         timeInput.value = `${startNow.getFullYear()}-${pad(startNow.getMonth() + 1)}-${pad(startNow.getDate())}` +
             `T${pad(startNow.getHours())}:${pad(startNow.getMinutes())}`;
 
