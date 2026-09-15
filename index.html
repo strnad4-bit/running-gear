@@ -73,8 +73,7 @@
         <input type="text" id="city_input" value="Prague">
 
         <label for="time_input">Time:</label>
-        <!-- step="900" is 900 seconds (15 minutes) -->
-        <input type="datetime-local" id="time_input" step="900">
+        <input type="datetime-local" id="time_input">
 
         <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
 
@@ -84,26 +83,10 @@
     <script>
         const timeInput = document.getElementById('time_input');
 
-        // Set the default datetime input to the nearest 15-minute mark
+        // Set the default datetime input to your current local time
         const now = new Date();
-        const currentMinutes = now.getMinutes();
-        now.setMinutes(Math.round(currentMinutes / 15) * 15, 0, 0); 
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         timeInput.value = now.toISOString().slice(0, 16);
-
-        // Force the input to snap to 15-minute intervals if the user clicks a wrong minute
-        timeInput.addEventListener('change', function(e) {
-            if (!e.target.value) return;
-            const d = new Date(e.target.value);
-            const m = d.getMinutes();
-            if (m % 15 !== 0) {
-                // Round to the nearest 15 minutes
-                d.setMinutes(Math.round(m / 15) * 15);
-                // Reformat to local time string
-                d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-                e.target.value = d.toISOString().slice(0, 16);
-            }
-        });
 
         async function fetchWeather() {
             const city = document.getElementById("city_input").value.trim();
