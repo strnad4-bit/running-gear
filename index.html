@@ -24,14 +24,21 @@
         h1 {
             font-size: 20px;
             text-align: center;
+            margin-bottom: 6px;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 13px;
+            color: #777;
             margin-bottom: 20px;
+            line-height: 1.4;
         }
         label {
             font-weight: bold;
             display: block;
             margin-top: 15px;
         }
-        input {
+        input[type="text"], input[type="datetime-local"] {
             width: 100%;
             padding: 10px;
             margin-top: 5px;
@@ -39,6 +46,17 @@
             border-radius: 6px;
             box-sizing: border-box;
             font-size: 16px;
+        }
+        input[type="range"] {
+            width: 100%;
+            margin-top: 8px;
+        }
+        .slider-ends {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
         }
         button {
             width: 100%;
@@ -52,9 +70,8 @@
             font-weight: bold;
             cursor: pointer;
         }
-        button:hover {
-            background-color: #0056b3;
-        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #9bbfe0; cursor: default; }
         #result_text {
             margin-top: 20px;
             padding: 15px;
@@ -68,12 +85,22 @@
 <body>
     <div class="container">
         <h1>When Are You Running?</h1>
+        <p class="subtitle">Recommendations assume you'll warm up once moving,
+        so you should feel slightly cool for the first few minutes.
+        Time is the local time at the city.</p>
 
         <label for="city_input">City:</label>
         <input type="text" id="city_input" value="Prague">
 
         <label for="time_input">Time:</label>
         <input type="datetime-local" id="time_input">
+
+        <label for="offset_input">Body thermostat: <span id="offset_label">Neutral</span></label>
+        <input type="range" id="offset_input" min="-4" max="4" step="1" value="0">
+        <div class="slider-ends">
+            <span>I run cold → more layers</span>
+            <span>I run warm → fewer layers</span>
+        </div>
 
         <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
 
@@ -82,26 +109,62 @@
 
     <script>
         const timeInput = document.getElementById('time_input');
+        const offsetInput = document.getElementById('offset_input');
+        const offsetLabel = document.getElementById('offset_label');
+        const fetchBtn = document.getElementById('fetch_btn');
 
         const now = new Date();
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         timeInput.value = now.toISOString().slice(0, 16);
 
+        function updateOffsetLabel() {
+            const v = parseInt(offsetInput.value, 10);
+            if (v === 0) offsetLabel.textContent = "Neutral";
+            else if (v < 0) offsetLabel.textContent = `Run cold (dress warmer) ${v}°C`;
+            else offsetLabel.textContent = `Run warm (dress lighter) +${v}°C`;
+        }
+        offsetInput.addEventListener('input', updateOffsetLabel);
+        updateOffsetLabel();
+
+        // Treat a naive "YYYY-MM-DDTHH:MM" wall-clock string as local time at the
+        // given UTC offset (seconds), returning a true absolute instant in ms.
+        function naiveToInstant(naiveStr, offsetSec) {
+            const [datePart, timePart] = naiveStr.split('T');
+            const [y, mo, d] = datePart.split('-').map(Number);
+            const [h, mi] = timePart.split(':').map(Number);
+            return Date.UTC(y, mo - 1, d, h, mi) - offsetSec * 1000;
+        }
+
+        // Format a naive city-local time string for display, no timezone conversion.
+        function formatCityTime(naiveStr) {
+            const [datePart, timePart] = naiveStr.split('T');
+            const [y, mo, d] = datePart.split('-').map(Number);
+            const [h, mi] = timePart.split(':').map(Number);
+            const dt = new Date(Date.UTC(y, mo - 1, d, h, mi));
+            const wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()];
+            const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][mo - 1];
+            return `${wd}, ${mon} ${d}, ${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
+        }
+
         async function fetchWeather() {
             const city = document.getElementById("city_input").value.trim();
             const timeStr = timeInput.value;
+            const offset = parseInt(offsetInput.value, 10) || 0;
             const resultElement = document.getElementById("result_text");
 
             if (!city) {
                 resultElement.innerText = "Please enter a city name.";
                 return;
             }
+            if (!timeStr) {
+                resultElement.innerText = "Please pick a time.";
+                return;
+            }
 
+            fetchBtn.disabled = true;
             resultElement.innerText = "Fetching forecast...";
 
             try {
-                const targetTime = new Date(timeStr);
-
                 const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
                 const geoResp = await fetch(geoUrl);
                 const geoData = await geoResp.json();
@@ -115,17 +178,20 @@
                 const lon = geoData.results[0].longitude;
 
                 const fields = "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,uv_index,is_day";
-                const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${fields}&hourly=${fields}&timezone=auto`;
+                const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+                    `&current=${fields}&hourly=${fields}&timezone=auto&forecast_days=16&past_days=1`;
                 const weatherResp = await fetch(weatherUrl);
                 const weatherData = await weatherResp.json();
 
-                let temp, feelsLike, windSpeed, precipitation, uvIndex, isDay, displayTime;
-                const nowMs = new Date().getTime();
-                const targetMs = targetTime.getTime();
+                const utcOffsetSec = weatherData.utc_offset_seconds || 0;
+                const nowMs = Date.now();
+                const targetMs = naiveToInstant(timeStr, utcOffsetSec);
+
+                let airTemp, feelsLike, windSpeed, precipitation, uvIndex, isDay, displayTime;
 
                 if (Math.abs(nowMs - targetMs) < 3600000) {
                     const current = weatherData.current;
-                    temp = current.temperature_2m;
+                    airTemp = current.temperature_2m;
                     feelsLike = current.apparent_temperature;
                     windSpeed = current.wind_speed_10m;
                     precipitation = current.precipitation;
@@ -138,50 +204,100 @@
                     let minDiff = Infinity;
 
                     for (let i = 0; i < times.length; i++) {
-                        const apiTime = new Date(times[i]);
-                        const diff = Math.abs(apiTime.getTime() - targetMs);
+                        const diff = Math.abs(naiveToInstant(times[i], utcOffsetSec) - targetMs);
                         if (diff < minDiff) {
                             minDiff = diff;
                             closestIdx = i;
                         }
                     }
 
-                    temp = weatherData.hourly.temperature_2m[closestIdx];
+                    // Guard: if the nearest available hour is more than ~1h away, the
+                    // requested time is outside the forecast window (about 16 days).
+                    if (minDiff > 3600000) {
+                        resultElement.innerText =
+                            "That time is outside the available forecast window " +
+                            "(roughly 1 day back to 16 days ahead). Pick a closer time.";
+                        return;
+                    }
+
+                    airTemp = weatherData.hourly.temperature_2m[closestIdx];
                     feelsLike = weatherData.hourly.apparent_temperature[closestIdx];
                     windSpeed = weatherData.hourly.wind_speed_10m[closestIdx];
                     precipitation = weatherData.hourly.precipitation[closestIdx];
                     uvIndex = weatherData.hourly.uv_index[closestIdx];
                     isDay = weatherData.hourly.is_day[closestIdx] === 1;
-
-                    const closestDate = new Date(times[closestIdx]);
-                    const options = { weekday: 'long', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false };
-                    displayTime = closestDate.toLocaleDateString('en-US', options);
+                    displayTime = formatCityTime(times[closestIdx]);
                 }
 
-                if (feelsLike === null || feelsLike === undefined) feelsLike = temp;
+                // Fallbacks for occasionally-missing fields.
+                if (airTemp === null || airTemp === undefined) {
+                    resultElement.innerText = "Temperature data unavailable for that time.";
+                    return;
+                }
+                if (feelsLike === null || feelsLike === undefined) feelsLike = airTemp;
+                if (windSpeed === null || windSpeed === undefined) windSpeed = 0;
+                if (precipitation === null || precipitation === undefined) precipitation = 0;
                 if (uvIndex === null || uvIndex === undefined) uvIndex = 0;
 
                 const windy = windSpeed > 20.0;
                 const rainy = precipitation > 0.5;
 
-                const recommendation = getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay);
+                const rec = getClothingRecommendation(airTemp, feelsLike, windy, rainy, uvIndex, isDay, offset);
                 const timeIcon = isDay ? "☀️" : "🌙";
+
+                const airR = Math.round(airTemp);
+                const feelsR = Math.round(feelsLike);
+                const windR = Math.round(windSpeed);
+                const rainR = Math.round(precipitation * 10) / 10;
+                const uvR = Math.round(uvIndex * 10) / 10;
+
+                // Owned "extras" block
+                let extrasDisplay;
+                if (rec.owned.length > 0) {
+                    extrasDisplay = "\n   - " + rec.owned.join("\n   - ");
+                } else {
+                    extrasDisplay = " Nothing special";
+                }
+
+                // Missing-gear block (things not in your wardrobe, flagged)
+                let missingDisplay = "";
+                if (rec.missing.length > 0) {
+                    missingDisplay += "\n\n🎒 Don't own — consider packing / getting:";
+                    for (const m of rec.missing) {
+                        missingDisplay += `\n   ⚠️ ${m.item}  (${m.severity})\n        → ${m.why}`;
+                    }
+                }
+
+                const offsetLine = offset !== 0
+                    ? `🎚️ Personal adjust: ${offset > 0 ? '+' : ''}${offset}°C ` +
+                      `(${offset > 0 ? 'dressing lighter' : 'dressing warmer'})\n`
+                    : "";
 
                 resultElement.innerText =
                     `⏱️ Forecast for: ${displayTime} ${timeIcon}\n` +
-                    `🌡️ Temp: ${temp}°C (feels ${feelsLike}°C) | 💨 Wind: ${windSpeed} km/h | 🌧️ Rain: ${precipitation} mm | ☀️ UV: ${uvIndex}\n\n` +
-                    `--- Your Running Gear ---\n` +
-                    `${recommendation}`;
+                    `🌡️ Air: ${airR}°C (feels ${feelsR}°C) | 💨 Wind: ${windR} km/h | 🌧️ Rain: ${rainR} mm | ☀️ UV: ${uvR}\n` +
+                    offsetLine +
+                    `\n--- Your Running Gear ---\n` +
+                    `👖 Bottoms: ${rec.bottoms}\n` +
+                    `👕 Tops: ${rec.tops}\n` +
+                    `🧦 Socks: ${rec.socks}\n` +
+                    `👟 Extras:${extrasDisplay}` +
+                    missingDisplay;
 
             } catch (e) {
                 resultElement.innerText = `Network Error: ${e.message}`;
+            } finally {
+                fetchBtn.disabled = false;
             }
         }
 
-        function getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay) {
-            const t = feelsLike;
+        function getClothingRecommendation(airTemp, feelsLike, windy, rainy, uvIndex, isDay, offset) {
+            // Decisions run off AIR temperature (the warm-up discount is baked into the
+            // thresholds below), shifted by your personal offset. Wind and rain are
+            // handled separately as modifiers, so wind is not double-counted.
+            const t = airTemp + (offset || 0);
 
-            // --- Bottoms ---
+            // --- Bottoms (legs generate heat fast — least temperature-sensitive) ---
             let bottoms;
             if (t >= 10) {
                 bottoms = "Running elastic shorts";
@@ -193,74 +309,101 @@
                 bottoms = "Warm long tights with your BJJ shorts layered on top";
             }
 
-            // --- Tops ---
+            // --- Tops (recalibrated ~4-5°C lighter than standing-still comfort) ---
             let tops;
-            if (t >= 18) {
+            if (t >= 14) {
                 tops = "Short sleeve technical shirt";
-            } else if (t >= 10) {
+            } else if (t >= 8) {
                 tops = "Long sleeve technical shirt (or BJJ long sleeve rashguard)";
-            } else if (t >= 5) {
+            } else if (t >= 3) {
                 tops = "Warm long sleeve technical shirt";
-            } else if (t >= 0) {
+            } else if (t >= -3) {
                 tops = "Warm long sleeve technical shirt with your BJJ short sleeve rashguard layered on top";
             } else {
                 tops = "Warm long sleeve technical shirt and your Fleece";
             }
 
             // --- Socks ---
-            let socks;
-            if (t < 5) {
-                socks = "Warm running socks";
-            } else {
-                socks = "Normal running socks";
+            let socks = (t < 5) ? "Warm running socks" : "Normal running socks";
+
+            const owned = [];   // in your wardrobe
+            const missing = []; // not owned — flagged for you to pack / consider
+
+            // --- Wind shell: your vest blocks wind on the core. Added for wind only,
+            //     NOT folded into the base layers, so nothing is double-counted. ---
+            if (windy && t < 13) {
+                owned.push("Light vest (blocks the wind on your core)");
             }
 
-            let accessories = [];
-
-            // --- Wind / Rain ---
-            if (windy && t < 15) {
-                accessories.push("Light vest (to block the wind on your core)");
+            // --- Head / ears (first thing to go cold; wind brings it on sooner) ---
+            let headItem = null; // "beanie" | "earband" | null
+            if (t < 1 || (windy && t < 4)) {
+                owned.push("Warm cap (beanie — covers your ears)");
+                headItem = "beanie";
+            } else if (t < 7 || (windy && t < 10)) {
+                // A full beanie runs too hot here, but ears still want cover.
+                missing.push({
+                    item: "Ear band / headband",
+                    why: "Ears get cold around 3-8°C" + (windy ? " and it's windy" : "") +
+                         ", but your beanie is too warm once you're moving. This fills the gap.",
+                    severity: "Optional"
+                });
+                headItem = "earband";
             }
+
+            // --- Rain: brim to keep water off your eyes, plus the shell you don't own ---
             if (rainy) {
-                accessories.push("Note: You don't have a rain shell in your wardrobe, so prepare to get wet!");
-            }
-
-            // --- Head ---
-            if (t < 2) {
-                accessories.push("Warm cap");
-            } else if (t < 8) {
-                accessories.push(rainy ? "Light cap (keeps rain out of your eyes)" : "Light cap");
-            } else if (rainy) {
-                accessories.push("Light cap (keeps rain out of your eyes)");
+                if (headItem !== "beanie") {
+                    owned.push("Light cap (brim keeps rain off your eyes/glasses)");
+                }
+                if (t < 4) {
+                    missing.push({
+                        item: "Waterproof shell (packable rain jacket, ideally hooded)",
+                        why: "Cold rain below ~4°C: wet clothing strips heat fast. For anything " +
+                             "beyond a short easy run this is effectively required, not optional.",
+                        severity: "Strongly recommended"
+                    });
+                } else if (t < 10) {
+                    missing.push({
+                        item: "Waterproof shell (packable rain jacket)",
+                        why: "Below ~10°C, wet plus any wind pulls heat away far faster than dry air " +
+                             "at the same temperature — worth having, especially on longer runs.",
+                        severity: "Recommended"
+                    });
+                }
+                // Above ~10°C rain is a comfort issue only — the brim cap is enough.
             }
 
             // --- Hands ---
-            if (t < 8) {
-                accessories.push("Tight Decathlon running gloves");
+            if (t < 8 || (windy && t < 12)) {
+                owned.push("Tight Decathlon running gloves");
             }
 
             // --- Neck ---
-            if (t < -5 || (windy && t < 2)) {
-                accessories.push("Neck gaiter");
+            if (t < -3 || (windy && t < 2)) {
+                owned.push("Neck gaiter");
             }
 
-            // --- Sun Protection ---
+            // --- Deep cold + wind: fleece isn't windproof and the vest is sleeveless,
+            //     so your arms take the chill. Optional gap-filler. ---
+            if (windy && t <= -3) {
+                missing.push({
+                    item: "Windproof running jacket",
+                    why: "In deep cold with wind, your fleece isn't windproof and the vest is " +
+                         "sleeveless, so your arms get wind-chilled. Core is covered; this seals the arms.",
+                    severity: "Optional"
+                });
+            }
+
+            // --- Sun protection ---
             if (isDay && !rainy && uvIndex >= 3) {
-                accessories.push("Running sunglasses");
+                owned.push("Running sunglasses");
             }
             if (isDay && uvIndex >= 6) {
-                accessories.push("Sunscreen (UV is high)");
+                owned.push("Sunscreen (UV is high)");
             }
 
-            let extrasDisplay;
-            if (accessories.length > 0) {
-                const accText = accessories.map(item => item.charAt(0).toUpperCase() + item.slice(1)).join("\n   - ");
-                extrasDisplay = `\n   - ${accText}`;
-            } else {
-                extrasDisplay = " Nothing special";
-            }
-
-            return `👖 Bottoms: ${bottoms}\n👕 Tops: ${tops}\n🧦 Socks: ${socks}\n👟 Extras:${extrasDisplay}`;
+            return { bottoms, tops, socks, owned, missing };
         }
     </script>
 </body>
