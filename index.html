@@ -60,7 +60,7 @@
             padding: 15px;
             background-color: #eef2f5;
             border-radius: 6px;
-            white-space: pre-wrap; 
+            white-space: pre-wrap;
             line-height: 1.5;
         }
     </style>
@@ -68,15 +68,15 @@
 <body>
     <div class="container">
         <h1>When Are You Running?</h1>
-        
+
         <label for="city_input">City:</label>
         <input type="text" id="city_input" value="Prague">
-        
+
         <label for="time_input">Time:</label>
         <input type="datetime-local" id="time_input">
-        
+
         <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
-        
+
         <div id="result_text">Enter a location and time to gear up.</div>
     </div>
 
@@ -115,11 +115,13 @@
                 const lon = geoData.results[0].longitude;
 
                 // 2. Fetch Weather Forecast
-                const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,precipitation,is_day&hourly=temperature_2m,wind_speed_10m,precipitation,is_day&timezone=auto`;
+                // Added: apparent_temperature (wind chill / "feels like") and uv_index (sun/glare, season-aware)
+                const fields = "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,uv_index,is_day";
+                const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${fields}&hourly=${fields}&timezone=auto`;
                 const weatherResp = await fetch(weatherUrl);
                 const weatherData = await weatherResp.json();
 
-                let temp, windSpeed, precipitation, isDay, displayTime;
+                let temp, feelsLike, windSpeed, precipitation, uvIndex, isDay, displayTime;
                 const nowMs = new Date().getTime();
                 const targetMs = targetTime.getTime();
 
@@ -127,8 +129,10 @@
                 if (Math.abs(nowMs - targetMs) < 3600000) {
                     const current = weatherData.current;
                     temp = current.temperature_2m;
+                    feelsLike = current.apparent_temperature;
                     windSpeed = current.wind_speed_10m;
                     precipitation = current.precipitation;
+                    uvIndex = current.uv_index;
                     isDay = current.is_day === 1;
                     displayTime = "Right Now";
                 } else {
@@ -146,8 +150,10 @@
                     }
 
                     temp = weatherData.hourly.temperature_2m[closestIdx];
+                    feelsLike = weatherData.hourly.apparent_temperature[closestIdx];
                     windSpeed = weatherData.hourly.wind_speed_10m[closestIdx];
                     precipitation = weatherData.hourly.precipitation[closestIdx];
+                    uvIndex = weatherData.hourly.uv_index[closestIdx];
                     isDay = weatherData.hourly.is_day[closestIdx] === 1;
 
                     const closestDate = new Date(times[closestIdx]);
@@ -155,15 +161,19 @@
                     displayTime = closestDate.toLocaleDateString('en-US', options);
                 }
 
+                // Guard against missing/null values from the API
+                if (feelsLike === null || feelsLike === undefined) feelsLike = temp;
+                if (uvIndex === null || uvIndex === undefined) uvIndex = 0;
+
                 const windy = windSpeed > 20.0;
                 const rainy = precipitation > 0.5;
 
-                const recommendation = getClothingRecommendation(temp, windy, rainy, isDay);
+                const recommendation = getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay);
                 const timeIcon = isDay ? "☀️" : "🌙";
 
-                resultElement.innerText = 
+                resultElement.innerText =
                     `⏱️ Forecast for: ${displayTime} ${timeIcon}\n` +
-                    `🌡️ Temp: ${temp}°C | 💨 Wind: ${windSpeed} km/h | 🌧️ Rain: ${precipitation} mm\n\n` +
+                    `🌡️ Temp: ${temp}°C (feels ${feelsLike}°C) | 💨 Wind: ${windSpeed} km/h | 🌧️ Rain: ${precipitation} mm | ☀️ UV: ${uvIndex}\n\n` +
                     `--- Running Gear Recommendation ---\n` +
                     `${recommendation}`;
 
@@ -172,48 +182,70 @@
             }
         }
 
-        function getClothingRecommendation(temp, windy, rainy, isDay) {
+        function getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay) {
+            // Use "feels like" (wind chill) for layering decisions, since that's what your body experiences.
+            const t = feelsLike;
+
+            // --- Bottoms (based on feels-like temp) ---
             let bottoms;
-            if (temp >= 10) {
+            if (t >= 10) {
                 bottoms = "running shorts";
-            } else if (temp >= 0) {
+            } else if (t >= 0) {
                 bottoms = "light running tights";
             } else {
                 bottoms = "thermal winter running tights";
             }
 
+            // --- Tops (base/mid layer only; the outer shell is decided separately below) ---
             let tops;
-            if (temp >= 20) {
+            if (t >= 20) {
                 tops = "a moisture-wicking singlet or tank top";
-            } else if (temp >= 12) {
+            } else if (t >= 12) {
                 tops = "a short-sleeve tech shirt";
-            } else if (temp >= 5) {
+            } else if (t >= 5) {
                 tops = "a long-sleeve moisture-wicking shirt";
-            } else if (temp >= -5) {
-                tops = "a long-sleeve base layer and a light running jacket";
+            } else if (t >= -5) {
+                tops = "a long-sleeve base layer";
             } else {
-                tops = "a thermal base layer, mid-layer, and a windproof running jacket";
+                tops = "a thermal base layer and an insulating mid-layer";
             }
 
+            // --- Outer shell: ONE decision, so we never stack two jackets ---
+            // Priority: rain shell > windproof (very cold) > windbreaker (wind). 
+            let shell = null;
+            if (rainy) {
+                shell = (t < 15)
+                    ? "a water-resistant running jacket"
+                    : "a light water-resistant shell (or just a cap if you don't mind getting wet)";
+            } else if (t < -5) {
+                shell = "a windproof running jacket";
+            } else if (windy && t < 12) {
+                shell = "a light running windbreaker";
+            }
+
+            // --- Accessories ---
             let accessories = [];
+            if (shell) accessories.push(shell);
 
-            if (windy && temp >= 5) {
-                accessories.push("a light running windbreaker");
-            }
             if (rainy) {
                 accessories.push("a running cap with a brim (keeps rain out of your eyes)");
-                if (temp < 15) {
-                    accessories.push("a water-resistant running jacket");
-                }
             }
-            if (temp < 5 && temp >= -5) {
+
+            // Hands / head based on feels-like temp
+            if (t < 5 && t >= -5) {
                 accessories.push("light running gloves and a thin headband or beanie");
-            } else if (temp < -5) {
+            } else if (t < -5) {
                 accessories.push("warm running gloves, a thermal beanie, and a neck gaiter (buff)");
             }
 
-            if (temp >= 10 && !rainy && isDay) {
+            // Sunglasses driven by actual sun exposure (UV), not temperature.
+            // WHO scale: 0-2 low, 3-5 moderate, 6-7 high, 8+ very high.
+            // This is automatically season/latitude aware (low UV in Nov, high in Jun).
+            if (isDay && !rainy && uvIndex >= 3) {
                 accessories.push("running sunglasses");
+            }
+            if (isDay && uvIndex >= 6) {
+                accessories.push("sweat-resistant sunscreen (UV is high)");
             }
 
             if (!isDay) {
