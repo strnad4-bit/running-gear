@@ -4,10 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Run Gear Forecaster</title>
-    
-    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
-    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
-    
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -77,139 +73,166 @@
         <input type="text" id="city_input" value="Prague">
         
         <label for="time_input">Time:</label>
-        <!-- Native Date/Time picker -->
         <input type="datetime-local" id="time_input">
         
-        <button id="fetch_btn">Get Run Gear</button>
+        <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
         
         <div id="result_text">Enter a location and time to gear up.</div>
     </div>
 
-    <script type="py">
-        from datetime import datetime
-        from pyodide.http import pyfetch
-        from pyscript import document, when
+    <script>
+        // Set the default datetime input to your current local time
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('time_input').value = now.toISOString().slice(0, 16);
 
-        # Set the default time in the picker to "right now" on page load
-        now = datetime.now()
-        document.getElementById("time_input").value = now.strftime("%Y-%m-%dT%H:%M")
+        async function fetchWeather() {
+            const city = document.getElementById("city_input").value.trim();
+            const timeStr = document.getElementById("time_input").value;
+            const resultElement = document.getElementById("result_text");
 
-        # Safely bind the button click to this function
-        @when("click", "#fetch_btn")
-        async def fetch_weather(event):
-            city = document.getElementById("city_input").value.strip()
-            time_str = document.getElementById("time_input").value
-            result_element = document.getElementById("result_text")
+            if (!city) {
+                resultElement.innerText = "Please enter a city name.";
+                return;
+            }
 
-            if not city:
-                result_element.innerText = "Please enter a city name."
-                return
-                
-            result_element.innerText = "Fetching forecast... (This might take a few seconds on first load)"
+            resultElement.innerText = "Fetching forecast...";
 
-            try:
-                # Convert the HTML time string into a Python datetime object
-                target_time = datetime.fromisoformat(time_str)
+            try {
+                const targetTime = new Date(timeStr);
 
-                # Get Coordinates
-                geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=en&format=json"
-                geo_resp = await pyfetch(geo_url)
-                geo_data = await geo_resp.json()
+                // 1. Get Coordinates
+                const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
+                const geoResp = await fetch(geoUrl);
+                const geoData = await geoResp.json();
 
-                if "results" not in geo_data:
-                    result_element.innerText = f"Could not find city: {city}"
-                    return
+                if (!geoData.results || geoData.results.length === 0) {
+                    resultElement.innerText = `Could not find city: ${city}`;
+                    return;
+                }
 
-                lat = geo_data["results"][0]["latitude"]
-                lon = geo_data["results"][0]["longitude"]
+                const lat = geoData.results[0].latitude;
+                const lon = geoData.results[0].longitude;
 
-                # Fetch Forecast Weather
-                weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,precipitation,is_day&hourly=temperature_2m,wind_speed_10m,precipitation,is_day&timezone=auto"
-                weather_resp = await pyfetch(weather_url)
-                weather_data = await weather_resp.json()
+                // 2. Fetch Weather Forecast
+                const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,precipitation,is_day&hourly=temperature_2m,wind_speed_10m,precipitation,is_day&timezone=auto`;
+                const weatherResp = await fetch(weatherUrl);
+                const weatherData = await weatherResp.json();
 
-                # If the chosen time is within 1 hour of now, use current weather
-                if abs((datetime.now() - target_time).total_seconds()) < 3600:
-                    current = weather_data["current"]
-                    temp = current["temperature_2m"]
-                    wind_speed = current["wind_speed_10m"]
-                    precipitation = current["precipitation"]
-                    is_day = bool(current["is_day"])
-                    display_time = "Right Now"
-                else:
-                    times = weather_data["hourly"]["time"]
-                    api_times = [datetime.fromisoformat(t) for t in times]
-                    closest_idx = min(range(len(api_times)), key=lambda i: abs(api_times[i] - target_time))
+                let temp, windSpeed, precipitation, isDay, displayTime;
+                const nowMs = new Date().getTime();
+                const targetMs = targetTime.getTime();
 
-                    temp = weather_data["hourly"]["temperature_2m"][closest_idx]
-                    wind_speed = weather_data["hourly"]["wind_speed_10m"][closest_idx]
-                    precipitation = weather_data["hourly"]["precipitation"][closest_idx]
-                    is_day = bool(weather_data["hourly"]["is_day"][closest_idx])
-                    
-                    display_time = api_times[closest_idx].strftime("%A, %b %d at %H:%M")
+                // If target time is within 1 hour of right now, use real-time current values
+                if (Math.abs(nowMs - targetMs) < 3600000) {
+                    const current = weatherData.current;
+                    temp = current.temperature_2m;
+                    windSpeed = current.wind_speed_10m;
+                    precipitation = current.precipitation;
+                    isDay = current.is_day === 1;
+                    displayTime = "Right Now";
+                } else {
+                    const times = weatherData.hourly.time;
+                    let closestIdx = 0;
+                    let minDiff = Infinity;
 
-                windy = wind_speed > 20.0
-                rainy = precipitation > 0.5
+                    for (let i = 0; i < times.length; i++) {
+                        const apiTime = new Date(times[i]);
+                        const diff = Math.abs(apiTime.getTime() - targetMs);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closestIdx = i;
+                        }
+                    }
 
-                recommendation = get_clothing_recommendation(temp, windy, rainy, is_day)
-                time_icon = "☀️" if is_day else "🌙"
+                    temp = weatherData.hourly.temperature_2m[closestIdx];
+                    windSpeed = weatherData.hourly.wind_speed_10m[closestIdx];
+                    precipitation = weatherData.hourly.precipitation[closestIdx];
+                    isDay = weatherData.hourly.is_day[closestIdx] === 1;
 
-                # Push the results to the HTML screen
-                result_element.innerText = (
-                    f"⏱️ Forecast for: {display_time} {time_icon}\n"
-                    f"🌡️ Temp: {temp}°C | 💨 Wind: {wind_speed} km/h | 🌧️ Rain: {precipitation} mm\n\n"
-                    f"--- Running Gear Recommendation ---\n"
-                    f"{recommendation}"
-                )
+                    const closestDate = new Date(times[closestIdx]);
+                    const options = { weekday: 'long', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false };
+                    displayTime = closestDate.toLocaleDateString('en-US', options);
+                }
 
-            except Exception as e:
-                result_element.innerText = f"Network Error: {str(e)}"
+                const windy = windSpeed > 20.0;
+                const rainy = precipitation > 0.5;
 
-        def get_clothing_recommendation(temp, windy, rainy, is_day):
-            if temp >= 10:
-                bottoms = "running shorts"
-            elif temp >= 0:
-                bottoms = "light running tights"
-            else:
-                bottoms = "thermal winter running tights"
+                const recommendation = getClothingRecommendation(temp, windy, rainy, isDay);
+                const timeIcon = isDay ? "☀️" : "🌙";
 
-            if temp >= 20:
-                tops = "a moisture-wicking singlet or tank top"
-            elif temp >= 12:
-                tops = "a short-sleeve tech shirt"
-            elif temp >= 5:
-                tops = "a long-sleeve moisture-wicking shirt"
-            elif temp >= -5:
-                tops = "a long-sleeve base layer and a light running jacket"
-            else:
-                tops = "a thermal base layer, mid-layer, and a windproof running jacket"
+                resultElement.innerText = 
+                    `⏱️ Forecast for: ${displayTime} ${timeIcon}\n` +
+                    `🌡️ Temp: ${temp}°C | 💨 Wind: ${windSpeed} km/h | 🌧️ Rain: ${precipitation} mm\n\n` +
+                    `--- Running Gear Recommendation ---\n` +
+                    `${recommendation}`;
 
-            accessories = []
-            
-            if windy and temp >= 5:
-                accessories.append("a light running windbreaker")
-            if rainy:
-                accessories.append("a running cap with a brim (keeps rain out of your eyes)")
-                if temp < 15:
-                    accessories.append("a water-resistant running jacket")
-            if temp < 5 and temp >= -5:
-                accessories.append("light running gloves and a thin headband or beanie")
-            elif temp < -5:
-                accessories.append("warm running gloves, a thermal beanie, and a neck gaiter (buff)")
-                
-            if temp >= 10 and not rainy and is_day:
-                accessories.append("running sunglasses")
-                
-            if not is_day:
-                accessories.append("reflective gear or a running light (stay visible!)")
+            } catch (e) {
+                resultElement.innerText = `Network Error: ${e.message}`;
+            }
+        }
 
-            if accessories:
-                acc_text = "\n   - ".join(accessories)
-                extras_display = f"\n   - {acc_text.capitalize()}"
-            else:
-                extras_display = " Nothing special"
+        function getClothingRecommendation(temp, windy, rainy, isDay) {
+            let bottoms;
+            if (temp >= 10) {
+                bottoms = "running shorts";
+            } else if (temp >= 0) {
+                bottoms = "light running tights";
+            } else {
+                bottoms = "thermal winter running tights";
+            }
 
-            return f"👖 Bottoms: {bottoms.capitalize()}\n👕 Tops: {tops.capitalize()}\n👟 Extras:{extras_display}"
+            let tops;
+            if (temp >= 20) {
+                tops = "a moisture-wicking singlet or tank top";
+            } else if (temp >= 12) {
+                tops = "a short-sleeve tech shirt";
+            } else if (temp >= 5) {
+                tops = "a long-sleeve moisture-wicking shirt";
+            } else if (temp >= -5) {
+                tops = "a long-sleeve base layer and a light running jacket";
+            } else {
+                tops = "a thermal base layer, mid-layer, and a windproof running jacket";
+            }
+
+            let accessories = [];
+
+            if (windy && temp >= 5) {
+                accessories.push("a light running windbreaker");
+            }
+            if (rainy) {
+                accessories.push("a running cap with a brim (keeps rain out of your eyes)");
+                if (temp < 15) {
+                    accessories.push("a water-resistant running jacket");
+                }
+            }
+            if (temp < 5 && temp >= -5) {
+                accessories.push("light running gloves and a thin headband or beanie");
+            } else if (temp < -5) {
+                accessories.push("warm running gloves, a thermal beanie, and a neck gaiter (buff)");
+            }
+
+            if (temp >= 10 && !rainy && isDay) {
+                accessories.push("running sunglasses");
+            }
+
+            if (!isDay) {
+                accessories.push("reflective gear or a running light (stay visible!)");
+            }
+
+            let extrasDisplay;
+            if (accessories.length > 0) {
+                const accText = accessories.map(item => item.charAt(0).toUpperCase() + item.slice(1)).join("\n   - ");
+                extrasDisplay = `\n   - ${accText}`;
+            } else {
+                extrasDisplay = " Nothing special";
+            }
+
+            const capBottoms = bottoms.charAt(0).toUpperCase() + bottoms.slice(1);
+            const capTops = tops.charAt(0).toUpperCase() + tops.slice(1);
+
+            return `👖 Bottoms: ${capBottoms}\n👕 Tops: ${capTops}\n👟 Extras:${extrasDisplay}`;
+        }
     </script>
 </body>
 </html>
