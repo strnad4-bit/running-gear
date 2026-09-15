@@ -24,21 +24,14 @@
         h1 {
             font-size: 20px;
             text-align: center;
-            margin-bottom: 6px;
-        }
-        .subtitle {
-            text-align: center;
-            font-size: 13px;
-            color: #777;
             margin-bottom: 20px;
-            line-height: 1.4;
         }
         label {
             font-weight: bold;
             display: block;
             margin-top: 15px;
         }
-        input[type="text"], input[type="datetime-local"], select {
+        input[type="text"], input[type="datetime-local"] {
             width: 100%;
             padding: 10px;
             margin-top: 5px;
@@ -80,22 +73,20 @@
             white-space: pre-wrap;
             line-height: 1.5;
         }
+        .version {
+            text-align: center;
+            font-size: 11px;
+            color: #bbb;
+            margin-top: 16px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>When Are You Running?</h1>
-        <p class="subtitle">Recommendations assume you'll warm up once moving,
-        so you should feel slightly cool for the first few minutes.
-        Time is the local time at the city.</p>
 
-        <label for="city_select">City:</label>
-        <select id="city_select">
-            <option value="Prague">Praha / Prague</option>
-            <option value="Koblasko">Koblasko</option>
-            <option value="__other__">Other (type below)…</option>
-        </select>
-        <input type="text" id="city_input" placeholder="Type a city name" style="display:none; margin-top:8px;">
+        <label for="city_input">City:</label>
+        <input type="text" id="city_input" placeholder="Detecting your location…">
 
         <label for="time_input">Time:</label>
         <input type="datetime-local" id="time_input" step="900">
@@ -110,6 +101,8 @@
         <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
 
         <div id="result_text">Enter a location and time to gear up.</div>
+
+        <p class="version">v4 · updated 15 Sep 2026</p>
     </div>
 
     <script>
@@ -117,28 +110,9 @@
         const offsetInput = document.getElementById('offset_input');
         const offsetLabel = document.getElementById('offset_label');
         const fetchBtn = document.getElementById('fetch_btn');
-        const citySelect = document.getElementById('city_select');
         const cityInput = document.getElementById('city_input');
 
-        // Show the free-text box only when "Other" is selected.
-        citySelect.addEventListener('change', () => {
-            const other = citySelect.value === '__other__';
-            cityInput.style.display = other ? 'block' : 'none';
-            if (other) cityInput.focus();
-        });
-
-        function getCity() {
-            return citySelect.value === '__other__'
-                ? cityInput.value.trim()
-                : citySelect.value;
-        }
-
-        // Default the time to now, rounded to the nearest 15 min (matches the picker step).
-        const pad = n => String(n).padStart(2, '0');
-        const now = new Date();
-        now.setMinutes(Math.round(now.getMinutes() / 15) * 15, 0, 0);
-        timeInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
-            `T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const FALLBACK_CITY = "Prague";
 
         function updateOffsetLabel() {
             const v = parseInt(offsetInput.value, 10);
@@ -148,6 +122,36 @@
         }
         offsetInput.addEventListener('input', updateOffsetLabel);
         updateOffsetLabel();
+
+        // --- City default: current location, with a fallback you can overwrite ---
+        cityInput.value = FALLBACK_CITY;
+        (function detectLocation() {
+            if (!navigator.geolocation) return; // keep fallback
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                try {
+                    const { latitude, longitude } = pos.coords;
+                    const url = `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+                        `?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`;
+                    const resp = await fetch(url);
+                    const data = await resp.json();
+                    const detected = data.city || data.locality || data.principalSubdivision;
+                    // Only overwrite if the user hasn't already typed something else.
+                    if (detected && cityInput.value === FALLBACK_CITY) cityInput.value = detected;
+                } catch (e) { /* keep fallback */ }
+            }, () => { /* denied or unavailable: keep fallback */ },
+               { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 });
+        })();
+
+        function getCity() {
+            return cityInput.value.trim();
+        }
+
+        // Default the time to now, rounded to the nearest 15 min (matches the picker step).
+        const pad = n => String(n).padStart(2, '0');
+        const startNow = new Date();
+        startNow.setMinutes(Math.round(startNow.getMinutes() / 15) * 15, 0, 0);
+        timeInput.value = `${startNow.getFullYear()}-${pad(startNow.getMonth() + 1)}-${pad(startNow.getDate())}` +
+            `T${pad(startNow.getHours())}:${pad(startNow.getMinutes())}`;
 
         // Treat a naive "YYYY-MM-DDTHH:MM" wall-clock string as local time at the
         // given UTC offset (seconds), returning a true absolute instant in ms.
@@ -197,8 +201,14 @@
                     return;
                 }
 
-                const lat = geoData.results[0].latitude;
-                const lon = geoData.results[0].longitude;
+                const r0 = geoData.results[0];
+                const lat = r0.latitude;
+                const lon = r0.longitude;
+
+                // Build a readable resolved name as proof of which place was found.
+                let resolvedName = r0.name;
+                if (r0.admin1 && r0.admin1 !== r0.name) resolvedName += `, ${r0.admin1}`;
+                if (r0.country) resolvedName += `, ${r0.country}`;
 
                 const fields = "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,uv_index,is_day";
                 const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
@@ -274,7 +284,7 @@
                 const rainR = Math.round(precipitation * 10) / 10;
                 const uvR = Math.round(uvIndex * 10) / 10;
 
-                // Owned "extras" block
+                // Owned "extras" block (warm socks now live here; normal socks are silent)
                 let extrasDisplay;
                 if (rec.owned.length > 0) {
                     extrasDisplay = "\n   - " + rec.owned.join("\n   - ");
@@ -297,13 +307,13 @@
                     : "";
 
                 resultElement.innerText =
-                    `⏱️ Forecast for: ${displayTime} ${timeIcon}\n` +
+                    `📍 Forecast for ${resolvedName}\n` +
+                    `⏱️ ${displayTime} ${timeIcon}\n` +
                     `🌡️ Air: ${airR}°C (feels ${feelsR}°C) | 💨 Wind: ${windR} km/h | 🌧️ Rain: ${rainR} mm | ☀️ UV: ${uvR}\n` +
                     offsetLine +
                     `\n--- Your Running Gear ---\n` +
                     `👖 Bottoms: ${rec.bottoms}\n` +
                     `👕 Tops: ${rec.tops}\n` +
-                    `🧦 Socks: ${rec.socks}\n` +
                     `👟 Extras:${extrasDisplay}` +
                     missingDisplay;
 
@@ -346,11 +356,13 @@
                 tops = "Warm long sleeve technical shirt and your Fleece";
             }
 
-            // --- Socks ---
-            let socks = (t < 5) ? "Warm running socks" : "Normal running socks";
-
             const owned = [];   // in your wardrobe
             const missing = []; // not owned — flagged for you to pack / consider
+
+            // --- Socks: only mentioned when warm socks are wanted; otherwise silent ---
+            if (t < 5) {
+                owned.push("Warm running socks");
+            }
 
             // --- Wind shell: your vest blocks wind on the core. Added for wind only,
             //     NOT folded into the base layers, so nothing is double-counted. ---
@@ -426,7 +438,7 @@
                 owned.push("Sunscreen (UV is high)");
             }
 
-            return { bottoms, tops, socks, owned, missing };
+            return { bottoms, tops, owned, missing };
         }
     </script>
 </body>
