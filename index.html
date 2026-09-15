@@ -38,7 +38,7 @@
             display: block;
             margin-top: 15px;
         }
-        input[type="text"], input[type="datetime-local"] {
+        input[type="text"], input[type="datetime-local"], select {
             width: 100%;
             padding: 10px;
             margin-top: 5px;
@@ -89,11 +89,16 @@
         so you should feel slightly cool for the first few minutes.
         Time is the local time at the city.</p>
 
-        <label for="city_input">City:</label>
-        <input type="text" id="city_input" value="Prague">
+        <label for="city_select">City:</label>
+        <select id="city_select">
+            <option value="Prague">Praha / Prague</option>
+            <option value="Koblasko">Koblasko</option>
+            <option value="__other__">Other (type below)…</option>
+        </select>
+        <input type="text" id="city_input" placeholder="Type a city name" style="display:none; margin-top:8px;">
 
         <label for="time_input">Time:</label>
-        <input type="datetime-local" id="time_input">
+        <input type="datetime-local" id="time_input" step="900">
 
         <label for="offset_input">Body thermostat: <span id="offset_label">Neutral</span></label>
         <input type="range" id="offset_input" min="-4" max="4" step="1" value="0">
@@ -112,10 +117,28 @@
         const offsetInput = document.getElementById('offset_input');
         const offsetLabel = document.getElementById('offset_label');
         const fetchBtn = document.getElementById('fetch_btn');
+        const citySelect = document.getElementById('city_select');
+        const cityInput = document.getElementById('city_input');
 
+        // Show the free-text box only when "Other" is selected.
+        citySelect.addEventListener('change', () => {
+            const other = citySelect.value === '__other__';
+            cityInput.style.display = other ? 'block' : 'none';
+            if (other) cityInput.focus();
+        });
+
+        function getCity() {
+            return citySelect.value === '__other__'
+                ? cityInput.value.trim()
+                : citySelect.value;
+        }
+
+        // Default the time to now, rounded to the nearest 15 min (matches the picker step).
+        const pad = n => String(n).padStart(2, '0');
         const now = new Date();
-        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-        timeInput.value = now.toISOString().slice(0, 16);
+        now.setMinutes(Math.round(now.getMinutes() / 15) * 15, 0, 0);
+        timeInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+            `T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
         function updateOffsetLabel() {
             const v = parseInt(offsetInput.value, 10);
@@ -147,7 +170,7 @@
         }
 
         async function fetchWeather() {
-            const city = document.getElementById("city_input").value.trim();
+            const city = getCity();
             const timeStr = timeInput.value;
             const offset = parseInt(offsetInput.value, 10) || 0;
             const resultElement = document.getElementById("result_text");
