@@ -73,7 +73,8 @@
         <input type="text" id="city_input" value="Prague">
 
         <label for="time_input">Time:</label>
-        <input type="datetime-local" id="time_input">
+        <!-- Added step="1800" to restrict input to 30-minute (1800 second) increments -->
+        <input type="datetime-local" id="time_input" step="1800">
 
         <button id="fetch_btn" onclick="fetchWeather()">Get Run Gear</button>
 
@@ -81,8 +82,11 @@
     </div>
 
     <script>
-        // Set the default datetime input to your current local time
+        // Set the default datetime input to the nearest 30-minute mark of your current local time
         const now = new Date();
+        const currentMinutes = now.getMinutes();
+        // Snap to 00 or 30
+        now.setMinutes(currentMinutes >= 30 ? 30 : 0, 0, 0); 
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         document.getElementById('time_input').value = now.toISOString().slice(0, 16);
 
@@ -115,7 +119,6 @@
                 const lon = geoData.results[0].longitude;
 
                 // 2. Fetch Weather Forecast
-                // Added: apparent_temperature (wind chill / "feels like") and uv_index (sun/glare, season-aware)
                 const fields = "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,uv_index,is_day";
                 const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${fields}&hourly=${fields}&timezone=auto`;
                 const weatherResp = await fetch(weatherUrl);
@@ -183,10 +186,9 @@
         }
 
         function getClothingRecommendation(temp, feelsLike, windy, rainy, uvIndex, isDay) {
-            // Use "feels like" (wind chill) for layering decisions, since that's what your body experiences.
             const t = feelsLike;
 
-            // --- Bottoms (based on feels-like temp) ---
+            // --- Bottoms ---
             let bottoms;
             if (t >= 10) {
                 bottoms = "running shorts";
@@ -196,7 +198,7 @@
                 bottoms = "thermal winter running tights";
             }
 
-            // --- Tops (base/mid layer only; the outer shell is decided separately below) ---
+            // --- Tops ---
             let tops;
             if (t >= 20) {
                 tops = "a moisture-wicking singlet or tank top";
@@ -210,8 +212,7 @@
                 tops = "a thermal base layer and an insulating mid-layer";
             }
 
-            // --- Outer shell: ONE decision, so we never stack two jackets ---
-            // Priority: rain shell > windproof (very cold) > windbreaker (wind). 
+            // --- Outer shell ---
             let shell = null;
             if (rainy) {
                 shell = (t < 15)
@@ -231,25 +232,17 @@
                 accessories.push("a running cap with a brim (keeps rain out of your eyes)");
             }
 
-            // Hands / head based on feels-like temp
             if (t < 5 && t >= -5) {
                 accessories.push("light running gloves and a thin headband or beanie");
             } else if (t < -5) {
                 accessories.push("warm running gloves, a thermal beanie, and a neck gaiter (buff)");
             }
 
-            // Sunglasses driven by actual sun exposure (UV), not temperature.
-            // WHO scale: 0-2 low, 3-5 moderate, 6-7 high, 8+ very high.
-            // This is automatically season/latitude aware (low UV in Nov, high in Jun).
             if (isDay && !rainy && uvIndex >= 3) {
                 accessories.push("running sunglasses");
             }
             if (isDay && uvIndex >= 6) {
                 accessories.push("sweat-resistant sunscreen (UV is high)");
-            }
-
-            if (!isDay) {
-                accessories.push("reflective gear or a running light (stay visible!)");
             }
 
             let extrasDisplay;
