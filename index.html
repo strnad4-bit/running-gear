@@ -5,11 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Run Gear Forecaster</title>
     
-    <!-- Load the PyScript framework -->
     <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
     <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
     
-    <!-- Basic styling to make it look like a clean mobile app -->
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -72,7 +70,6 @@
     </style>
 </head>
 <body>
-
     <div class="container">
         <h1>When Are You Running?</h1>
         
@@ -80,30 +77,28 @@
         <input type="text" id="city_input" value="Prague">
         
         <label for="time_input">Time:</label>
-        <input type="text" id="time_input" value="now">
+        <!-- Native Date/Time picker -->
+        <input type="datetime-local" id="time_input">
         
-        <!-- PyScript binds the Python function to this click event -->
-        <button id="fetch_btn" py-click="fetch_weather">Get Run Gear</button>
+        <button id="fetch_btn">Get Run Gear</button>
         
         <div id="result_text">Enter a location and time to gear up.</div>
     </div>
 
-    <!-- Configure the environment to install our date parser library -->
-    <py-config>
-        packages = ["dateparser"]
-    </py-config>
-
-    <!-- The Python Logic -->
     <script type="py">
-        import dateparser
         from datetime import datetime
         from pyodide.http import pyfetch
-        from pyscript import document
+        from pyscript import document, when
 
+        # Set the default time in the picker to "right now" on page load
+        now = datetime.now()
+        document.getElementById("time_input").value = now.strftime("%Y-%m-%dT%H:%M")
+
+        # Safely bind the button click to this function
+        @when("click", "#fetch_btn")
         async def fetch_weather(event):
-            # Read inputs from the HTML fields
             city = document.getElementById("city_input").value.strip()
-            time_input = document.getElementById("time_input").value.strip().lower()
+            time_str = document.getElementById("time_input").value
             result_element = document.getElementById("result_text")
 
             if not city:
@@ -113,17 +108,10 @@
             result_element.innerText = "Fetching forecast... (This might take a few seconds on first load)"
 
             try:
-                # 1. Figure out target time
-                if time_input == "" or time_input == "now":
-                    target_time = "now"
-                else:
-                    parsed_time = dateparser.parse(time_input, settings={'PREFER_DATES_FROM': 'future'})
-                    if not parsed_time:
-                        result_element.innerText = f"Could not understand the time: '{time_input}'."
-                        return
-                    target_time = parsed_time.replace(tzinfo=None)
+                # Convert the HTML time string into a Python datetime object
+                target_time = datetime.fromisoformat(time_str)
 
-                # 2. Get Coordinates using pyfetch instead of requests
+                # Get Coordinates
                 geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=en&format=json"
                 geo_resp = await pyfetch(geo_url)
                 geo_data = await geo_resp.json()
@@ -135,13 +123,13 @@
                 lat = geo_data["results"][0]["latitude"]
                 lon = geo_data["results"][0]["longitude"]
 
-                # 3. Fetch Forecast Weather
+                # Fetch Forecast Weather
                 weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,precipitation,is_day&hourly=temperature_2m,wind_speed_10m,precipitation,is_day&timezone=auto"
                 weather_resp = await pyfetch(weather_url)
                 weather_data = await weather_resp.json()
 
-                # 4. Match Time to Data
-                if target_time == "now":
+                # If the chosen time is within 1 hour of now, use current weather
+                if abs((datetime.now() - target_time).total_seconds()) < 3600:
                     current = weather_data["current"]
                     temp = current["temperature_2m"]
                     wind_speed = current["wind_speed_10m"]
@@ -166,7 +154,7 @@
                 recommendation = get_clothing_recommendation(temp, windy, rainy, is_day)
                 time_icon = "☀️" if is_day else "🌙"
 
-                # 5. Push the results to the HTML screen
+                # Push the results to the HTML screen
                 result_element.innerText = (
                     f"⏱️ Forecast for: {display_time} {time_icon}\n"
                     f"🌡️ Temp: {temp}°C | 💨 Wind: {wind_speed} km/h | 🌧️ Rain: {precipitation} mm\n\n"
